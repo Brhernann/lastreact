@@ -1,0 +1,82 @@
+cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+        - node_modules/
+
+Compile Application Staging:
+    image: node:latest
+    stage: Compile Application
+    tags:
+        - private
+        - staging
+        - cache
+    before_script:
+        - npm config set cache node_modules/
+        - npm install
+    script:
+        - echo "REACT_APP_API_BASE_URL=${GDD_APP_API_BASE_URL}" >> .env
+        - echo "REACT_APP_SECRET_TOKEN=${GDD_APP_SECRET_TOKEN}" >> .env
+        - echo "REACT_APP_API_KEY=${GDD_APP_API_KEY}" >> .env
+        - cat .env
+        - npm run build
+    artifacts:
+        paths:
+            - build/
+    environment:
+        name: dev
+    only:
+        - branches
+    except:
+        - master
+
+Unit Test Staging:
+    image: node:latest
+    stage: Unit Test
+    tags:
+        - private
+        - staging
+        - cache
+    before_script:
+        - npm config set cache node_modules/
+    script:
+        - npm -version
+    artifacts:
+        paths:
+            - build/
+    environment:
+        name: dev
+    only:
+        - branches
+    except:
+        - master
+
+Docker Project Image Staging:
+    image: docker:stable
+    stage: Package
+    tags:
+        - private
+        - staging
+        - cache
+    services:
+        - docker:dind
+    variables:
+        DOCKER_HOST: tcp://localhost:2375
+        DOCKER_DRIVER: overlay2
+    before_script:
+        - docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN registry.gitlab.com
+    script:
+        - ls -ltr
+        - echo $CI_PIPELINE_IID
+        - |
+            echo "Docker build $CI_COMMIT_REF_NAME"
+            echo "version: $CI_PIPELINE_IID"
+            export IMAGE_PACKAGE=$CI_REGISTRY_IMAGE:$CI_PIPELINE_IID
+            echo "image name: $IMAGE_PACKAGE"
+            docker build --network host -t $IMAGE_PACKAGE -f docker/Dockerfile .
+            docker push $IMAGE_PACKAGE
+    environment:
+        name: dev
+    only:
+        - branches
+    except:
+        - master

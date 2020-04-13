@@ -1,0 +1,95 @@
+include:
+    - local: '/ci/development.yml'
+    - local: '/ci/production.yml'
+
+stages:
+    - Compile Application
+    - Unit Test
+    - Package
+    - Staging Deploy
+    - Production Deploy
+
+.deploy_script: &deploy_script
+    image:
+        name: registry.gitlab.com/cencosud-ds/arquitectura-plataforma/tools/aws-terraform-kubectl:latest
+        entrypoint:
+            - '/usr/bin/env'
+            - 'PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+    before_script:
+        - aws configure set default.region ${AWS_REGION}
+        - temp=`echo "$TARGET_K8S" | tr '[:lower:]' '[:upper:]'`
+        - accessKey="AWS_ACCESS_KEY_ID_$temp" && secretKey="AWS_SECRET_ACCESS_KEY_$temp"
+        - export AWS_ACCESS_KEY_ID=$(eval echo "\$$accessKey") && export AWS_SECRET_ACCESS_KEY=$(eval echo "\$$secretKey")
+        - aws eks update-kubeconfig --name $TARGET_EKS_ENV
+    script:
+        - |
+            export SECRET=$(kubectl get secrets -n theshipper | grep $REGISTRY_AUTH_NAME | head -1 | cut -d ' ' -f 1)
+            echo "pull secret is '$SECRET'"
+            if [ "$SECRET" == "" ]; then
+              kubectl create secret docker-registry $REGISTRY_AUTH_NAME \
+                --docker-server=$CI_REGISTRY \
+                --docker-username=$CI_DEPLOY_USER \
+                --docker-password=$CI_DEPLOY_PASSWORD -n theshipper
+              echo "secret name $REGISTRY_AUTH_NAME"
+            fi
+
+        - |
+            cat k8s/deployment-template.yml.ignore | \
+            sed 's/\${REGISTRY_AUTH_NAME}'"/$REGISTRY_AUTH_NAME/g" | \
+            sed 's/\${PROJECT_NAME}'"/$CI_PROJECT_NAME/g" | \
+            sed 's/\${SECRET_NAME}'"/$SECRET_NAME/g" | \
+            sed 's/\${PROJECT_IMG_URL}'"/$CI_IMG_URL/g" | \
+            sed 's/\${PROJECT_IMG_TAG}'"/$CI_PIPELINE_IID/g" > k8s/deployment.yaml
+        - cat k8s/deployment.yaml
+        - |
+            cat k8s/aws-ingress.yml.ignore |
+            sed 's/\${PROJECT_NAME}'"/$CI_PROJECT_NAME/g" | \
+            sed 's/\${URL_BASE}'"/$URL_BASE/g" > k8s/aws-ingress.yml
+        - cat k8s/aws-ingress.yml
+
+        - kubectl apply -n theshipper -f k8s/ --record=true
+        - kubectl -n theshipper rollout status -w deployment/$CI_PROJECT_NAME
+
+deploy:staging:
+    <<: *deploy_script
+    stage: Staging Deploy
+    tags:
+        - private
+        - staging
+        - cache
+    variables:
+        TARGET_EKS_ENV: staging
+        URL_BASE: aws-test
+        TARGET_K8S: dev
+        IMAGEN: $CI_PIPELINE_IID
+        GDD_APP_API_BASE_URL: https://backend-shipper.aws-test.paris.cl
+        REGISTRY_AUTH_NAME: gitlab-auth-${CI_PROJECT_NAME}
+        CI_IMG_URL: "registry.gitlab.com\\/cencosud-ds\\/ordenes-y-entrega\\/the-shipper\\/${CI_PROJECT_NAME}"
+    only:
+        - branches
+    except:
+        - master
+    environment:
+        name: dev
+    when: manual
+
+deploy:production:
+    <<: *deploy_script
+    stage: Production Deploy
+    tags:
+        - private
+        - cache
+        - production
+    variables:
+        TARGET_EKS_ENV: eks-txd-prd
+        URL_BASE: aws
+        TARGET_K8S: prd
+        IMAGEN: $CI_PIPELINE_IID
+        GDD_APP_API_BASE_URL: https://backend-shipper.aws.paris.cl
+        REGISTRY_AUTH_NAME: gitlab-auth-${CI_PROJECT_NAME}
+        CI_IMG_URL: "registry.gitlab.com\\/cencosud-ds\\/ordenes-y-entrega\\/the-shipper\\/${CI_PROJECT_NAME}"
+    only:
+        - master
+    environment:
+        name: prd
+    when: manual

@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend-shipper-gdd
+  namespace: theshipper
+  labels:
+    name: frontend-shipper-gdd
+    area: txd
+    app: frontend
+    role: frontend
+    version: "1"
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+  selector:
+    name: frontend-shipper-gdd

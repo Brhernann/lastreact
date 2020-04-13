@@ -1,0 +1,69 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: ${PROJECT_NAME}
+spec:
+  replicas: 1
+  revisionHistoryLimit: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels: 
+      app: ${PROJECT_NAME}
+      role: frontend
+      name: ${PROJECT_NAME}
+  template:
+    metadata:
+      labels:
+        name: ${PROJECT_NAME}
+        area: txd
+        app: ${PROJECT_NAME}
+        role: frontend
+        version: "1"
+    spec:
+      serviceAccountName: theshipper
+      imagePullSecrets:
+      - name: ${REGISTRY_AUTH_NAME}
+      nodeSelector:
+        node-role.kubernetes.io/user: "true"
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app
+                operator: In
+                values:
+                - ${PROJECT_NAME}
+            topologyKey: "kubernetes.io/hostname"
+      containers:
+      - name: ${PROJECT_NAME}
+        image: ${PROJECT_IMG_URL}:${PROJECT_IMG_TAG}
+        imagePullPolicy: Always
+        resources:
+          limits:
+            cpu: 750m
+            memory: 0.6Gi
+          requests:
+            cpu: 325m
+            memory: 300Mi
+        ports:
+        - name: http
+          containerPort: 80
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 100
+          timeoutSeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 100
+          timeoutSeconds: 10
+          periodSeconds: 30
